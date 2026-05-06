@@ -97,15 +97,8 @@ def collect_selected_color(obj):
 
 
 
-def face_has_nondefault_color(face, color_layer, epsilon=1e-6):
-    if not face.loops:
-        return False
-    c = face.loops[0][color_layer]
-    return (abs(c[0]) > epsilon) or (abs(c[1]) > epsilon) or (abs(c[2]) > epsilon) or (abs(c[3] - 1.0) > epsilon)
-
-
-def face_has_assigned_color(face, assigned_layer, color_layer):
-    return bool(face[assigned_layer]) or face_has_nondefault_color(face, color_layer)
+def face_has_assigned_color(face, assigned_layer):
+    return face[assigned_layer] == 1
 
 
 def select_faces_by_color(obj, color, threshold=0.02):
@@ -124,7 +117,7 @@ def auto_assign_loose_parts(obj, existing_palette, min_dist):
     bm = bmesh.from_edit_mesh(obj.data)
     layer = active_color_layer(bm)
     assigned_layer = active_assigned_layer(bm)
-    uncolored = [f for f in bm.faces if not face_has_assigned_color(f, assigned_layer, layer)]
+    uncolored = [f for f in bm.faces if not face_has_assigned_color(f, assigned_layer)]
     if not uncolored:
         return 0
 
@@ -145,7 +138,7 @@ def auto_assign_loose_parts(obj, existing_palette, min_dist):
             island.append(f)
             for e in f.edges:
                 for linked in e.link_faces:
-                    if not linked.tag and not face_has_assigned_color(linked, assigned_layer, layer):
+                    if not linked.tag and not face_has_assigned_color(linked, assigned_layer):
                         linked.tag = True
                         stack.append(linked)
 
@@ -280,7 +273,7 @@ class CID_OT_auto_loose_parts(Operator):
         if scene.cid_palette:
             scene.cid_palette_index = len(scene.cid_palette) - 1
 
-        self.report({'INFO'}, f"Processed loose parts: {total_parts}")
+        self.report({'INFO'}, f"Processed loose parts: {total_parts} (objects: {len(edit_meshes)})")
         return {'FINISHED'}
 
 
