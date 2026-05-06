@@ -154,6 +154,51 @@ def auto_assign_loose_parts(obj, existing_palette, min_dist):
     return count_parts
 
 
+
+
+def clear_color_from_object(obj, target_color, threshold=0.02):
+    if obj.type != 'MESH':
+        return 0
+    mesh = obj.data
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    color_layer = bm.loops.layers.color.get(LAYER_NAME)
+    if color_layer is None:
+        bm.free()
+        return 0
+    assigned_layer = bm.faces.layers.int.get(ASSIGNED_LAYER_NAME)
+
+    removed = 0
+    for f in bm.faces:
+        if not f.loops:
+            continue
+        c = f.loops[0][color_layer]
+        d = abs(c[0]-target_color[0]) + abs(c[1]-target_color[1]) + abs(c[2]-target_color[2])
+        if d <= threshold:
+            for loop in f.loops:
+                loop[color_layer] = (0.0, 0.0, 0.0, 1.0)
+            if assigned_layer is not None:
+                f[assigned_layer] = 0
+            removed += 1
+
+    if removed:
+        bm.to_mesh(mesh)
+        mesh.update()
+    bm.free()
+    return removed
+
+
+def clear_palette_colors_from_scene(scene, threshold):
+    colors = [tuple(item.color) for item in scene.cid_palette]
+    total = 0
+    for obj in bpy.data.objects:
+        if obj.type != 'MESH':
+            continue
+        for color in colors:
+            total += clear_color_from_object(obj, color, threshold=threshold)
+    return total
+
+
 class CID_PaletteItem(PropertyGroup):
     color: FloatVectorProperty(
         name="Color",
@@ -277,14 +322,44 @@ class CID_OT_auto_loose_parts(Operator):
         return {'FINISHED'}
 
 
+
+
+class CID_OT_remove_selected_color(Operator):
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_idname = "cid.remove_selected_color"
+    bl_label = "Remove Selected Color"
+
+    def execute(self, context):
+        scene = context.scene
+        idx = scene.cid_palette_index
+        if idx < 0 or idx >= len(scene.cid_palette):
+            return {'CANCELLED'}
+
+        color = tuple(scene.cid_palette[idx].color)
+        total = 0
+        for obj in bpy.data.objects:
+            total += clear_color_from_object(obj, color, threshold=scene.cid_select_threshold)
+
+        scene.cid_palette.remove(idx)
+        scene.cid_palette_index = min(idx, len(scene.cid_palette) - 1) if scene.cid_palette else 0
+        self.report({'INFO'}, f"Removed color from palette and {total} faces")
+        return {'FINISHED'}
+
+
 class CID_OT_clear_palette(Operator):
     bl_options = {'REGISTER', 'UNDO'}
     bl_idname = "cid.clear_palette"
     bl_label = "Clear Palette"
 
+    def invoke(self, context, event):
+        return context.window_manager.invoke_confirm(self, event)
+
     def execute(self, context):
-        context.scene.cid_palette.clear()
-        context.scene.cid_palette_index = 0
+        scene = context.scene
+        total = clear_palette_colors_from_scene(scene, scene.cid_select_threshold)
+        scene.cid_palette.clear()
+        scene.cid_palette_index = 0
+        self.report({'INFO'}, f"Cleared palette and removed colors from {total} faces")
         return {'FINISHED'}
 
 
@@ -316,7 +391,9 @@ class CID_PT_panel(Panel):
         row.prop(scene, "cid_min_distance")
         row.prop(scene, "cid_select_threshold")
 
-        layout.operator("cid.clear_palette", icon='TRASH')
+        row = layout.row(align=True)
+        row.operator("cid.remove_selected_color", icon='REMOVE')
+        row.operator("cid.clear_palette", icon='TRASH')
 
 
 classes = (
@@ -327,6 +404,7 @@ classes = (
     CID_OT_select_by_palette,
     CID_OT_pick_from_selection,
     CID_OT_auto_loose_parts,
+    CID_OT_remove_selected_color,
     CID_OT_clear_palette,
     CID_PT_panel,
 )
