@@ -22,12 +22,20 @@ from bpy.types import Operator, Panel, PropertyGroup, UIList
 
 
 LAYER_NAME = "ColorID"
+ASSIGNED_LAYER_NAME = "ColorID_Assigned"
 
 
 def active_color_layer(bm):
     layer = bm.loops.layers.color.get(LAYER_NAME)
     if layer is None:
         layer = bm.loops.layers.color.new(LAYER_NAME)
+    return layer
+
+
+def active_assigned_layer(bm):
+    layer = bm.faces.layers.int.get(ASSIGNED_LAYER_NAME)
+    if layer is None:
+        layer = bm.faces.layers.int.new(ASSIGNED_LAYER_NAME)
     return layer
 
 
@@ -64,11 +72,13 @@ def ensure_item(scene, color, label=""):
 def assign_to_selected_faces(obj, color):
     bm = bmesh.from_edit_mesh(obj.data)
     layer = active_color_layer(bm)
+    assigned_layer = active_assigned_layer(bm)
     changed = False
     for f in bm.faces:
         if f.select:
             for loop in f.loops:
                 loop[layer] = color
+            f[assigned_layer] = 1
             changed = True
     if changed:
         bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)
@@ -87,11 +97,8 @@ def collect_selected_color(obj):
 
 
 
-def face_has_assigned_color(face, layer, epsilon=1e-6):
-    if not face.loops:
-        return False
-    c = face.loops[0][layer]
-    return (abs(c[0]) > epsilon) or (abs(c[1]) > epsilon) or (abs(c[2]) > epsilon) or (abs(c[3]) > epsilon)
+def face_has_assigned_color(face, assigned_layer):
+    return bool(face[assigned_layer])
 
 
 def select_faces_by_color(obj, color, threshold=0.02):
@@ -109,7 +116,8 @@ def select_faces_by_color(obj, color, threshold=0.02):
 def auto_assign_loose_parts(obj, existing_palette, min_dist):
     bm = bmesh.from_edit_mesh(obj.data)
     layer = active_color_layer(bm)
-    uncolored = [f for f in bm.faces if not face_has_assigned_color(f, layer)]
+    assigned_layer = active_assigned_layer(bm)
+    uncolored = [f for f in bm.faces if not face_has_assigned_color(f, assigned_layer)]
     if not uncolored:
         return 0
 
@@ -130,7 +138,7 @@ def auto_assign_loose_parts(obj, existing_palette, min_dist):
             island.append(f)
             for e in f.edges:
                 for linked in e.link_faces:
-                    if not linked.tag and not face_has_assigned_color(linked, layer):
+                    if not linked.tag and not face_has_assigned_color(linked, assigned_layer):
                         linked.tag = True
                         stack.append(linked)
 
@@ -139,6 +147,7 @@ def auto_assign_loose_parts(obj, existing_palette, min_dist):
         for f in island:
             for loop in f.loops:
                 loop[layer] = new_color
+            f[assigned_layer] = 1
         count_parts += 1
 
     bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)
